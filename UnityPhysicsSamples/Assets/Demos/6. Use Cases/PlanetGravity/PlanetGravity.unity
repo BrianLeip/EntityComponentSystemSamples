@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 0}
-  m_IndirectSpecularColor: {r: 0.00558429, g: 0.002545912, b: 0.0088953795, a: 1}
+  m_IndirectSpecularColor: {r: 0.005647258, g: 0.002547372, b: 0.008974818, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -465,8 +465,8 @@ MonoBehaviour:
     x: 200
     y: 200
     z: 200
+  count: 15000
   massFactor: 4
-  count: 9999
 --- !u!114 &1666823651
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -690,7 +690,7 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.3
-  far clip plane: 400
+  far clip plane: 1000
   field of view: 60
   orthographic: 0
   orthographic size: 5
