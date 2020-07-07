@@ -1,12 +1,17 @@
 {
   "dependencies": {
+<<<<<<< HEAD
     "com.havok.physics": "0.2.2-preview",
+=======
+    "com.unity.dataflowgraph": "0.15.0-preview.4",
+    "com.unity.dots.editor": "0.7.0-preview.1",
+>>>>>>> d049e768b36b1fbaed6d124017ef053c5a5d2731
     "com.unity.ide.rider": "1.1.4",
     "com.unity.ide.vscode": "1.2.0",
     "com.unity.inputsystem": "1.0.0-preview.6",
     "com.unity.performance.profile-analyzer": "0.6.0-preview.1",
-    "com.unity.physics": "0.3.2-preview",
-    "com.unity.rendering.hybrid": "0.4.0-preview.8",
+    "com.unity.physics": "0.4.0-preview.5",
+    "com.unity.rendering.hybrid": "0.5.2-preview.4",
     "com.unity.ugui": "1.0.0",
     "com.unity.modules.ai": "1.0.0",
     "com.unity.modules.androidjni": "1.0.0",
@@ -41,7 +46,6 @@
     "com.unity.modules.xr": "1.0.0"
   },
   "testables": [
-    "com.unity.physics",
-    "com.unity.test-framework.performance"
+    "com.unity.physics"
   ]
 }
