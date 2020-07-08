@@ -6,10 +6,10 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Physics.Extensions;
-using Unity.Physics.Stateful;
 using Unity.Physics.Systems;
 using Unity.Transforms;
 using UnityEngine;
+using UnityEngine.Assertions;
 using static CharacterControllerUtilities;
 using static Unity.Physics.PhysicsStep;
 
@@ -26,9 +26,7 @@ public struct CharacterControllerComponentData : IComponentData
     public float CharacterMass;
     public float SkinWidth;
     public float ContactTolerance;
-    public byte AffectsPhysicsBodies;
-    public byte RaiseCollisionEvents;
-    public byte RaiseTriggerEvents;
+    public int AffectsPhysicsBodies;
 }
 
 public struct CharacterControllerInput : IComponentData
@@ -84,14 +82,7 @@ public class CharacterControllerAuthoring : MonoBehaviour, IConvertGameObjectToE
     public float ContactTolerance = 0.1f;
 
     // Whether to affect other rigid bodies
-    public bool AffectsPhysicsBodies = true;
-
-    // Whether to raise collision events
-    // Note: collision events raised by character controller will always have details calculated
-    public bool RaiseCollisionEvents = false;
-
-    // Whether to raise trigger events
-    public bool RaiseTriggerEvents = false;
+    public int AffectsPhysicsBodies = 1;
 
     void OnEnable() { }
 
@@ -111,9 +102,7 @@ public class CharacterControllerAuthoring : MonoBehaviour, IConvertGameObjectToE
                 CharacterMass = CharacterMass,
                 SkinWidth = SkinWidth,
                 ContactTolerance = ContactTolerance,
-                AffectsPhysicsBodies = (byte)(AffectsPhysicsBodies ? 1 : 0),
-                RaiseCollisionEvents = (byte)(RaiseCollisionEvents ? 1 : 0),
-                RaiseTriggerEvents = (byte)(RaiseTriggerEvents ? 1 : 0)
+                AffectsPhysicsBodies = AffectsPhysicsBodies,
             };
             var internalData = new CharacterControllerInternalData
             {
@@ -123,26 +112,16 @@ public class CharacterControllerAuthoring : MonoBehaviour, IConvertGameObjectToE
 
             dstManager.AddComponentData(entity, componentData);
             dstManager.AddComponentData(entity, internalData);
-            if (RaiseCollisionEvents)
-            {
-                dstManager.AddBuffer<StatefulCollisionEvent>(entity);
-            }
-            if (RaiseTriggerEvents)
-            {
-                dstManager.AddBuffer<StatefulTriggerEvent>(entity);
-                dstManager.AddComponentData(entity, new ExcludeFromTriggerEventConversion { });
-            }
         }
     }
 }
 
+
 [UpdateAfter(typeof(ExportPhysicsWorld)), UpdateBefore(typeof(EndFramePhysicsSystem))]
-public class CharacterControllerSystem : SystemBase
+public class CharacterControllerSystem : JobComponentSystem
 {
     const float k_DefaultTau = 0.4f;
     const float k_DefaultDamping = 0.9f;
-
-    public JobHandle OutDependency => Dependency;
 
     [BurstCompile]
     struct CharacterControllerJob : IJobChunk
@@ -152,13 +131,11 @@ public class CharacterControllerSystem : SystemBase
         [ReadOnly]
         public PhysicsWorld PhysicsWorld;
 
-        public ComponentTypeHandle<CharacterControllerInternalData> CharacterControllerInternalType;
-        public ComponentTypeHandle<Translation> TranslationType;
-        public ComponentTypeHandle<Rotation> RotationType;
-        public BufferTypeHandle<StatefulCollisionEvent> CollisionEventBufferType;
-        public BufferTypeHandle<StatefulTriggerEvent> TriggerEventBufferType;
-        [ReadOnly] public ComponentTypeHandle<CharacterControllerComponentData> CharacterControllerComponentType;
-        [ReadOnly] public ComponentTypeHandle<PhysicsCollider> PhysicsColliderType;
+        public ArchetypeChunkComponentType<CharacterControllerInternalData> CharacterControllerInternalType;
+        public ArchetypeChunkComponentType<Translation> TranslationType;
+        public ArchetypeChunkComponentType<Rotation> RotationType;
+        [ReadOnly] public ArchetypeChunkComponentType<CharacterControllerComponentData> CharacterControllerComponentType;
+        [ReadOnly] public ArchetypeChunkComponentType<PhysicsCollider> PhysicsColliderType;
 
         // Stores impulses we wish to apply to dynamic bodies the character is interacting with.
         // This is needed to avoid race conditions when 2 characters are interacting with the
@@ -175,20 +152,6 @@ public class CharacterControllerSystem : SystemBase
             var chunkTranslationData = chunk.GetNativeArray(TranslationType);
             var chunkRotationData = chunk.GetNativeArray(RotationType);
 
-            var hasChunkCollisionEventBufferType = chunk.Has(CollisionEventBufferType);
-            var hasChunkTriggerEventBufferType = chunk.Has(TriggerEventBufferType);
-
-            BufferAccessor<StatefulCollisionEvent> collisionEventBuffers = default;
-            BufferAccessor<StatefulTriggerEvent> triggerEventBuffers = default;
-            if (hasChunkCollisionEventBufferType)
-            {
-                collisionEventBuffers = chunk.GetBufferAccessor(CollisionEventBufferType);
-            }
-            if (hasChunkTriggerEventBufferType)
-            {
-                triggerEventBuffers = chunk.GetBufferAccessor(TriggerEventBufferType);
-            }
-            
             DeferredImpulseWriter.BeginForEachIndex(chunkIndex);
 
             for (int i = 0; i < chunk.Count; i++)
@@ -198,18 +161,6 @@ public class CharacterControllerSystem : SystemBase
                 var collider = chunkPhysicsColliderData[i];
                 var position = chunkTranslationData[i];
                 var rotation = chunkRotationData[i];
-                DynamicBuffer<StatefulCollisionEvent> collisionEventBuffer = default;
-                DynamicBuffer<StatefulTriggerEvent> triggerEventBuffer = default;
-
-                if (hasChunkCollisionEventBufferType)
-                {
-                    collisionEventBuffer = collisionEventBuffers[i];
-                }
-
-                if (hasChunkTriggerEventBufferType)
-                {
-                    triggerEventBuffer = triggerEventBuffers[i];
-                }
 
                 // Collision filter must be valid
                 if (!collider.IsValid || collider.Value.Value.Filter.IsEmpty)
@@ -240,24 +191,9 @@ public class CharacterControllerSystem : SystemBase
                     rot = rotation.Value
                 };
 
-                NativeList<StatefulCollisionEvent> currentFrameCollisionEvents = default;
-                NativeList<StatefulTriggerEvent> currentFrameTriggerEvents = default;
-
-                if (ccComponentData.RaiseCollisionEvents != 0)
-                {
-                    currentFrameCollisionEvents = new NativeList<StatefulCollisionEvent>(Allocator.Temp);
-                }
-
-                if (ccComponentData.RaiseTriggerEvents != 0)
-                {
-                    currentFrameTriggerEvents = new NativeList<StatefulTriggerEvent>(Allocator.Temp);
-                }
-
-
                 // Check support
                 CheckSupport(ref PhysicsWorld, ref collider, stepInput, transform,
-                    out ccInternalData.SupportedState, out float3 surfaceNormal, out float3 surfaceVelocity,
-                    currentFrameCollisionEvents);
+                    out ccInternalData.SupportedState, out float3 surfaceNormal, out float3 surfaceVelocity);
 
                 // User input
                 float3 desiredVelocity = ccInternalData.LinearVelocity;
@@ -275,20 +211,8 @@ public class CharacterControllerSystem : SystemBase
                 }
 
                 // World collision + integrate
-                CollideAndIntegrate(stepInput, ccComponentData.CharacterMass, ccComponentData.AffectsPhysicsBodies != 0,
-                    collider.ColliderPtr, ref transform, ref ccInternalData.LinearVelocity, ref DeferredImpulseWriter,
-                    currentFrameCollisionEvents, currentFrameTriggerEvents);
-
-                // Update collision event status
-                if (currentFrameCollisionEvents.IsCreated)
-                {
-                    UpdateCollisionEvents(currentFrameCollisionEvents, collisionEventBuffer);
-                }
-
-                if (currentFrameTriggerEvents.IsCreated)
-                {
-                    UpdateTriggerEvents(currentFrameTriggerEvents, triggerEventBuffer);
-                }
+                CollideAndIntegrate(stepInput, ccComponentData.CharacterMass, ccComponentData.AffectsPhysicsBodies > 0,
+                    collider.ColliderPtr, ref transform, ref ccInternalData.LinearVelocity, ref DeferredImpulseWriter);
 
                 // Write back and orientation integration
                 position.Value = transform.pos;
@@ -405,62 +329,6 @@ public class CharacterControllerSystem : SystemBase
             linearVelocity = math.rotate(surfaceFrame.Value, relative) + surfaceVelocity +
                 (isJumping ? math.dot(desiredVelocity, up) * up : float3.zero);
         }
-
-        private void UpdateTriggerEvents(NativeList<StatefulTriggerEvent> triggerEvents,
-            DynamicBuffer<StatefulTriggerEvent> triggerEventBuffer)
-        {
-            triggerEvents.Sort();
-
-            var previousFrameTriggerEvents = new NativeList<StatefulTriggerEvent>(triggerEventBuffer.Length, Allocator.Temp);
-
-            for (int i = 0; i < triggerEventBuffer.Length; i++)
-            {
-                var triggerEvent = triggerEventBuffer[i];
-                if (triggerEvent.State != EventOverlapState.Exit)
-                {
-                    previousFrameTriggerEvents.Add(triggerEvent);
-                }
-            }
-
-            var eventsWithState = new NativeList<StatefulTriggerEvent>(triggerEvents.Length, Allocator.Temp);
-
-            TriggerEventConversionSystem.UpdateTriggerEventState(previousFrameTriggerEvents, triggerEvents, eventsWithState);
-
-            triggerEventBuffer.Clear();
-
-            for (int i = 0; i < eventsWithState.Length; i++)
-            {
-                triggerEventBuffer.Add(eventsWithState[i]);
-            }
-        }
-
-        private void UpdateCollisionEvents(NativeList<StatefulCollisionEvent> collisionEvents,
-            DynamicBuffer<StatefulCollisionEvent> collisionEventBuffer)
-        {
-            collisionEvents.Sort();
-
-            var previousFrameCollisionEvents = new NativeList<StatefulCollisionEvent>(collisionEventBuffer.Length, Allocator.Temp);
-
-            for (int i = 0; i < collisionEventBuffer.Length; i++)
-            {
-                var collisionEvent = collisionEventBuffer[i];
-                if (collisionEvent.CollidingState != EventCollidingState.Exit)
-                {
-                    previousFrameCollisionEvents.Add(collisionEvent);
-                }
-            }
-
-            var eventsWithState = new NativeList<StatefulCollisionEvent>(collisionEvents.Length, Allocator.Temp);
-
-            CollisionEventConversionSystem.UpdateCollisionEventState(previousFrameCollisionEvents, collisionEvents, eventsWithState);
-
-            collisionEventBuffer.Clear();
-
-            for (int i = 0; i < eventsWithState.Length; i++)
-            {
-                collisionEventBuffer.Add(eventsWithState[i]);
-            }
-        }
     }
 
     [BurstCompile]
@@ -539,20 +407,18 @@ public class CharacterControllerSystem : SystemBase
         m_CharacterControllersGroup = GetEntityQuery(query);
     }
 
-    protected override void OnUpdate()
+    protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
         if (m_CharacterControllersGroup.CalculateEntityCount() == 0)
-            return;
+            return inputDeps;
 
         var chunks = m_CharacterControllersGroup.CreateArchetypeChunkArray(Allocator.TempJob);
 
-        var ccComponentType = GetComponentTypeHandle<CharacterControllerComponentData>();
-        var ccInternalType = GetComponentTypeHandle<CharacterControllerInternalData>();
-        var physicsColliderType = GetComponentTypeHandle<PhysicsCollider>();
-        var translationType = GetComponentTypeHandle<Translation>();
-        var rotationType = GetComponentTypeHandle<Rotation>();
-        var collisionEventBufferType = GetBufferTypeHandle<StatefulCollisionEvent>();
-        var triggerEventBufferType = GetBufferTypeHandle<StatefulTriggerEvent>();
+        var ccComponentType = GetArchetypeChunkComponentType<CharacterControllerComponentData>();
+        var ccInternalType = GetArchetypeChunkComponentType<CharacterControllerInternalData>();
+        var physicsColliderType = GetArchetypeChunkComponentType<PhysicsCollider>();
+        var translationType = GetArchetypeChunkComponentType<Translation>();
+        var rotationType = GetArchetypeChunkComponentType<Rotation>();
 
         var deferredImpulses = new NativeStream(chunks.Length, Allocator.TempJob);
 
@@ -564,17 +430,14 @@ public class CharacterControllerSystem : SystemBase
             PhysicsColliderType = physicsColliderType,
             TranslationType = translationType,
             RotationType = rotationType,
-            CollisionEventBufferType = collisionEventBufferType,
-            TriggerEventBufferType = triggerEventBufferType,
-
             // Input
             DeltaTime = UnityEngine.Time.fixedDeltaTime,
             PhysicsWorld = m_BuildPhysicsWorldSystem.PhysicsWorld,
             DeferredImpulseWriter = deferredImpulses.AsWriter()
         };
 
-        Dependency = JobHandle.CombineDependencies(Dependency, m_ExportPhysicsWorldSystem.GetOutputDependency());
-        Dependency = ccJob.Schedule(m_CharacterControllersGroup, Dependency);
+        inputDeps = JobHandle.CombineDependencies(inputDeps, m_ExportPhysicsWorldSystem.FinalJobHandle);
+        inputDeps = ccJob.Schedule(m_CharacterControllersGroup, inputDeps);
 
         var applyJob = new ApplyDefferedPhysicsUpdatesJob()
         {
@@ -586,15 +449,12 @@ public class CharacterControllerSystem : SystemBase
             RotationData = GetComponentDataFromEntity<Rotation>()
         };
 
-        Dependency = applyJob.Schedule(Dependency);
-        var disposeHandle = deferredImpulses.Dispose(Dependency);
+        inputDeps = applyJob.Schedule(inputDeps);
+        var disposeHandle = deferredImpulses.Dispose(inputDeps);
 
         // Must finish all jobs before physics step end
-        m_EndFramePhysicsSystem.AddInputDependency(disposeHandle);
-    }
+        m_EndFramePhysicsSystem.HandlesToWaitFor.Add(disposeHandle);
 
-#if !UNITY_ENTITIES_0_12_OR_NEWER
-    BufferTypeHandle<T> GetBufferTypeHandle<T>(bool isReadOnly = false) where T : struct, IBufferElementData => new BufferTypeHandle<T> { Value = GetArchetypeChunkBufferType<T>(isReadOnly) };
-    ComponentTypeHandle<T> GetComponentTypeHandle<T>(bool isReadOnly = false) where T : struct, IComponentData => new ComponentTypeHandle<T> { Value = GetArchetypeChunkComponentType<T>(isReadOnly) };
-#endif
+        return inputDeps;
+    }
 }

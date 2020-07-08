@@ -10,6 +10,7 @@ using Unity.Physics.Systems;
 using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
+using UnityEngine.UIElements;
 using Material = UnityEngine.Material;
 using Mesh = UnityEngine.Mesh;
 using Slider = UnityEngine.UI.Slider;
@@ -39,8 +40,6 @@ public class ProjectIntoFutureOnCueSystem : SystemBase
 #endif
 
     private JobHandle FinalJobHandle;
-    private StepPhysicsWorld m_StepPhysicsWorld;
-    private BuildPhysicsWorld m_BuildPhysicsWorld;
 
     public void Initialize(Entity whiteBall, int numSteps, Mesh referenceMesh, Material referenceMaterial, ref PhysicsWorld world)
     {
@@ -163,10 +162,8 @@ public class ProjectIntoFutureOnCueSystem : SystemBase
     {
         Positions = new NativeArray<float3>();
         LocalWorld = new PhysicsWorld();
-        FinalJobHandle = new JobHandle();
 
-        m_StepPhysicsWorld = World.GetOrCreateSystem<StepPhysicsWorld>();
-        m_BuildPhysicsWorld = World.GetOrCreateSystem<BuildPhysicsWorld>();
+        FinalJobHandle = new JobHandle();
     }
 
     protected override void OnDestroy()
@@ -190,14 +187,12 @@ public class ProjectIntoFutureOnCueSystem : SystemBase
 
         var jobHandle = Dependency;
 
-        // Make PhysicsWorld safe to read
-        FinalJobHandle = JobHandle.CombineDependencies(FinalJobHandle, m_StepPhysicsWorld.GetOutputDependency());
+        var buildPhysics = BasePhysicsDemo.DefaultWorld.GetExistingSystem<BuildPhysicsWorld>();
+        ref var world = ref buildPhysics.PhysicsWorld;
+        CheckEntityPool(world.NumDynamicBodies);
 
         // Complete the local simulation trails from the previous step.
         FinalJobHandle.Complete();
-
-        ref var world = ref m_BuildPhysicsWorld.PhysicsWorld;
-        CheckEntityPool(world.NumDynamicBodies);
 
         // Clear the trails ready for a new simulation prediction
         jobHandle = new ResetPositionsJob { Positions = Positions }.Schedule(jobHandle);
@@ -226,9 +221,8 @@ public class ProjectIntoFutureOnCueSystem : SystemBase
             World = LocalWorld,
             TimeStep = timeStep,
             NumSolverIterations = stepComponent.SolverIterationCount,
-            SolverStabilizationHeuristicSettings = stepComponent.SolverStabilizationHeuristicSettings,
             Gravity = stepComponent.Gravity,
-            SynchronizeCollisionWorld = true
+            SynchronizeCollisionWorld = true,
         };
 
         // Assign the requested cue ball velocity to the local simulation
@@ -255,7 +249,7 @@ public class ProjectIntoFutureOnCueSystem : SystemBase
 
                 // Dispose and reallocate input velocity buffer, if dynamic body count has increased.
                 // Dispose previous collision and trigger event streams and allocator new streams.
-                SimulationContext.Reset(stepInput);
+                SimulationContext.Reset(ref LocalWorld);
                 
                 new StepLocalWorldJob()
                 {

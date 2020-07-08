@@ -1,4 +1,7 @@
-﻿using Unity.Entities;
+﻿using Unity.Burst;
+using Unity.Collections;
+using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Physics.Systems;
@@ -41,22 +44,13 @@ public class RandomMotionAuthoring : MonoBehaviour, IConvertGameObjectToEntity
 [UpdateBefore(typeof(BuildPhysicsWorld))]
 public class RandomMotionSystem : SystemBase
 {
-    protected override void OnCreate()
-    {
-        RequireForUpdate(GetEntityQuery(new EntityQueryDesc
-        {
-            All = new ComponentType[]
-            {
-                typeof(RandomMotion)
-            }
-        }));
-    }
-
     protected override void OnUpdate()
     {
         var random = new Random();
         float deltaTime = UnityEngine.Time.fixedDeltaTime;
-        var stepComponent = HasSingleton<PhysicsStep>() ? GetSingleton<PhysicsStep>() : PhysicsStep.Default;
+        float3 gravity = HasSingleton<PhysicsStep>()
+            ? PhysicsStep.Default.Gravity
+            : GetSingleton<PhysicsStep>().Gravity;
 
         Entities
             .WithName("ApplyRandomMotion")
@@ -81,7 +75,7 @@ public class RandomMotionSystem : SystemBase
             velocity.Linear = math.lerp(velocity.Linear, offset, motion.Speed);
             if (mass.InverseMass != 0)
             {
-                velocity.Linear -= stepComponent.Gravity * deltaTime;
+                velocity.Linear -= gravity * deltaTime;
             }
         }).Schedule();
     }

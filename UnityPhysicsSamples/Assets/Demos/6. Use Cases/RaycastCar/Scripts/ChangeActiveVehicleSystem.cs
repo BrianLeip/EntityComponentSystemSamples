@@ -1,10 +1,12 @@
+using System;
 using Unity.Collections;
 using Unity.Entities;
 using UnityEngine;
 
 struct ActiveVehicle : IComponentData { }
 
-class ChangeActiveVehicleSystem : SystemBase
+[UpdateAfter(typeof(DemoInputGatheringSystem))]
+class ChangeActiveVehicleSystem : ComponentSystem
 {
     struct AvailableVehicle : ISystemStateComponentData { }
 

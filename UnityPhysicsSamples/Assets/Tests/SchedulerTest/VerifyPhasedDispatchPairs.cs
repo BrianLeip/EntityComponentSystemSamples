@@ -20,7 +20,7 @@ namespace Unity.Physics
     }
 
     [UpdateAfter(typeof(StepPhysicsWorld))]
-    public class VerifyPhasedDispatchPairsSystem : SystemBase
+    public class VerifyPhasedDispatchPairsSystem : JobComponentSystem
     {
         EntityQuery m_VerificationGroup;
         StepPhysicsWorld m_StepPhysicsWorld;
@@ -48,23 +48,23 @@ namespace Unity.Physics
             {
                 if (IsUnityPhysics)
                 {
-                    int bodyIndexA = pair.BodyIndexA;
-                    int bodyIndexB = pair.BodyIndexB;
+                    int bodyAIndex = pair.BodyIndices.BodyAIndex;
+                    int bodyBIndex = pair.BodyIndices.BodyBIndex;
 
-                    bool bodyBIsDynamic = bodyIndexB < LastStaticPairPerDynamicBody.Length;
+                    bool bodyBIsDynamic = bodyBIndex < LastStaticPairPerDynamicBody.Length;
                     if (bodyBIsDynamic)
                     {
-                        Assert.IsTrue(LastStaticPairPerDynamicBody[bodyIndexA] <= bodyIndexB);
+                        Assert.IsTrue(LastStaticPairPerDynamicBody[bodyAIndex] <= bodyBIndex);
                     }
                     else
                     {
-                        LastStaticPairPerDynamicBody[bodyIndexA] = bodyIndexB;
+                        LastStaticPairPerDynamicBody[bodyAIndex] = bodyBIndex;
                     }
                 }
             }
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             SimulationCallbacks.Callback verifyPhasedDispatchPairsJobCallback = (ref ISimulation simulation, ref PhysicsWorld world, JobHandle inDeps) =>
             {
@@ -77,7 +77,9 @@ namespace Unity.Physics
                 }.Schedule(simulation, ref world, inDeps);
             };
 
-            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateDispatchPairs, verifyPhasedDispatchPairsJobCallback, Dependency);
+            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateDispatchPairs, verifyPhasedDispatchPairsJobCallback, inputDeps);
+
+            return inputDeps;
         }
     }
 }

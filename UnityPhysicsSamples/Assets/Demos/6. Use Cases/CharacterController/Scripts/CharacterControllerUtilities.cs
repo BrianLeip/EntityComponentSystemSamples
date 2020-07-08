@@ -1,15 +1,11 @@
+using System;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Physics.Extensions;
-using Unity.Physics.Stateful;
 using UnityEngine.Assertions;
-#if !UNITY_ENTITIES_0_12_OR_NEWER
-using UnsafeUtility = UnsafeUtility_BackwardCompatibility;
-#else
-using Unity.Collections.LowLevel.Unsafe;
-#endif
 
 // Stores the impulse to be applied by the character controller body
 public struct DeferredCharacterControllerImpulse
@@ -59,21 +55,16 @@ public static class CharacterControllerUtilities
         public float MaxFraction { get; }
         public int NumHits => AllHits.Length;
 
-        public float MinHitFraction;
         public NativeList<T> AllHits;
-        public NativeList<T> TriggerHits;
 
         private PhysicsWorld m_world;
 
-        public CharacterControllerAllHitsCollector(int rbIndex, float maxFraction, ref NativeList<T> allHits, PhysicsWorld world,
-            NativeList<T> triggerHits = default)
+        public CharacterControllerAllHitsCollector(int rbIndex, float maxFraction, ref NativeList<T> allHits, PhysicsWorld world)
         {
             MaxFraction = maxFraction;
             AllHits = allHits;
             m_selfRBIndex = rbIndex;
             m_world = world;
-            TriggerHits = triggerHits;
-            MinHitFraction = float.MaxValue;
         }
 
         #region ICollector
@@ -82,21 +73,11 @@ public static class CharacterControllerUtilities
         {
             Assert.IsTrue(hit.Fraction < MaxFraction);
 
-            if (hit.RigidBodyIndex == m_selfRBIndex)
+            if ((hit.RigidBodyIndex == m_selfRBIndex) || IsTrigger(m_world.Bodies, hit.RigidBodyIndex, hit.ColliderKey))
             {
                 return false;
             }
 
-            if (IsTrigger(m_world.Bodies, hit.RigidBodyIndex, hit.ColliderKey))
-            {
-                if (TriggerHits.IsCreated)
-                {
-                    TriggerHits.Add(hit);
-                }
-                return false;
-            }
-
-            MinHitFraction = math.min(MinHitFraction, hit.Fraction);
             AllHits.Add(hit);
             return true;
         }
@@ -167,8 +148,7 @@ public static class CharacterControllerUtilities
 
     public static unsafe void CheckSupport(
         ref PhysicsWorld world, ref PhysicsCollider collider, CharacterControllerStepInput stepInput, RigidTransform transform,
-        out CharacterSupportState characterState, out float3 surfaceNormal, out float3 surfaceVelocity,
-        NativeList<StatefulCollisionEvent> collisionEvents = default)
+        out CharacterSupportState characterState, out float3 surfaceNormal, out float3 surfaceVelocity)
     {
         surfaceNormal = float3.zero;
         surfaceVelocity = float3.zero;
@@ -189,7 +169,6 @@ public static class CharacterControllerUtilities
                 Start = transform.pos,
                 End = transform.pos + maxDisplacement
             };
-
             world.CastCollider(input, ref castHitsCollector);
         }
 
@@ -228,21 +207,11 @@ public static class CharacterControllerUtilities
             for (int j = 0; j < constraints.Length; j++)
             {
                 var constraint = constraints[j];
-                if (constraint.Touched && !constraint.IsTooSteep && !constraint.IsMaxSlope)
+                if (constraint.Touched && !constraint.IsTooSteep)
                 {
                     numSupportingPlanes++;
                     surfaceNormal += constraint.Plane.Normal;
                     surfaceVelocity += constraint.Velocity;
-
-                    // Add supporting planes to collision events
-                    if (collisionEvents.IsCreated)
-                    {
-                        var collisionEvent = new StatefulCollisionEvent(stepInput.World.Bodies[stepInput.RigidBodyIndex].Entity,
-                            stepInput.World.Bodies[constraint.RigidBodyIndex].Entity, stepInput.RigidBodyIndex, constraint.RigidBodyIndex,
-                            ColliderKey.Empty, constraint.ColliderKey, constraint.Plane.Normal);
-                        collisionEvent.CollisionDetails = new StatefulCollisionEvent.Details(1, 0, constraint.HitPosition);
-                        collisionEvents.Add(collisionEvent);
-                    }
                 }
             }
 
@@ -292,9 +261,8 @@ public static class CharacterControllerUtilities
     }
 
     public static unsafe void CollideAndIntegrate(
-        CharacterControllerStepInput stepInput, float characterMass, bool affectBodies, Unity.Physics.Collider* collider,
-        ref RigidTransform transform, ref float3 linearVelocity, ref NativeStream.Writer deferredImpulseWriter,
-        NativeList<StatefulCollisionEvent> collisionEvents = default, NativeList<StatefulTriggerEvent> triggerEvents = default)
+        CharacterControllerStepInput stepInput, float characterMass, bool affectBodies, Collider* collider,
+        ref RigidTransform transform, ref float3 linearVelocity, ref NativeStream.Writer deferredImpulseWriter)
     {
         // Copy parameters
         float deltaTime = stepInput.DeltaTime;
@@ -317,14 +285,8 @@ public static class CharacterControllerUtilities
             // Do a collider cast
             {
                 float3 displacement = newVelocity * remainingTime;
-                NativeList<ColliderCastHit> triggerHits = default;
-                if (triggerEvents.IsCreated)
-                {
-                    triggerHits = new NativeList<ColliderCastHit>(k_DefaultQueryHitsCapacity / 4, Allocator.Temp);
-                }
                 NativeList<ColliderCastHit> castHits = new NativeList<ColliderCastHit>(k_DefaultQueryHitsCapacity, Allocator.Temp);
-                CharacterControllerAllHitsCollector<ColliderCastHit> collector = new CharacterControllerAllHitsCollector<ColliderCastHit>(
-                    stepInput.RigidBodyIndex, 1.0f, ref castHits, world, triggerHits);
+                CharacterControllerAllHitsCollector<ColliderCastHit> collector = new CharacterControllerAllHitsCollector<ColliderCastHit>(stepInput.RigidBodyIndex, 1.0f, ref castHits, world);
                 ColliderCastInput input = new ColliderCastInput()
                 {
                     Collider = collider,
@@ -341,12 +303,6 @@ public static class CharacterControllerUtilities
                     CreateConstraint(stepInput.World, stepInput.Up,
                         hit.RigidBodyIndex, hit.ColliderKey, hit.Position, hit.SurfaceNormal, math.dot(-hit.SurfaceNormal, hit.Fraction * displacement),
                         stepInput.SkinWidth, maxSlopeCos, ref constraints);
-                }
-
-                // Update trigger events
-                if (triggerEvents.IsCreated)
-                {
-                    UpdateTriggersSeen(stepInput, triggerHits, triggerEvents, collector.MinHitFraction);
                 }
             }
 
@@ -426,11 +382,10 @@ public static class CharacterControllerUtilities
             float3 prevPosition = newPosition;
             SimplexSolver.Solve(remainingTime, minDeltaTime, up, stepInput.MaxMovementSpeed, constraints, ref newPosition, ref newVelocity, out float integratedTime);
 
-            // Apply impulses to hit bodies and store collision events
-            if (affectBodies || collisionEvents.IsCreated)
+            // Apply impulses to hit bodies
+            if (affectBodies)
             {
-                CalculateAndStoreDeferredImpulsesAndCollisionEvents(stepInput, affectBodies, characterMass,
-                    prevVelocity, constraints, ref deferredImpulseWriter, collisionEvents);
+                CalculateAndStoreDeferredImpulses(stepInput, characterMass, prevVelocity, ref constraints, ref deferredImpulseWriter);
             }
 
             // Calculate new displacement
@@ -483,7 +438,7 @@ public static class CharacterControllerUtilities
         bool bodyIsDynamic = 0 <= rigidBodyIndex && rigidBodyIndex < world.NumDynamicBodies;
         constraint = new SurfaceConstraintInfo()
         {
-            Plane = new Unity.Physics.Plane
+            Plane = new Plane
             {
                 Normal = normal,
                 Distance = distance - skinWidth,
@@ -504,7 +459,6 @@ public static class CharacterControllerUtilities
 
         SurfaceConstraintInfo newConstraint = constraint;
         newConstraint.Plane.Normal = math.normalize(newConstraint.Plane.Normal - verticalComponent * up);
-        newConstraint.IsMaxSlope = true;
 
         float distance = newConstraint.Plane.Distance;
 
@@ -560,157 +514,92 @@ public static class CharacterControllerUtilities
         constraints.Add(constraint);
     }
 
-    private static unsafe void CalculateAndStoreDeferredImpulsesAndCollisionEvents(
-        CharacterControllerStepInput stepInput, bool affectBodies, float characterMass,
-        float3 linearVelocity, NativeList<SurfaceConstraintInfo> constraints, ref NativeStream.Writer deferredImpulseWriter,
-        NativeList<StatefulCollisionEvent> collisionEvents)
+    private static unsafe void CalculateAndStoreDeferredImpulses(
+        CharacterControllerStepInput stepInput, float characterMass, float3 linearVelocity,
+        ref NativeList<SurfaceConstraintInfo> constraints, ref NativeStream.Writer deferredImpulseWriter)
     {
         PhysicsWorld world = stepInput.World;
         for (int i = 0; i < constraints.Length; i++)
         {
             SurfaceConstraintInfo constraint = constraints[i];
+
             int rigidBodyIndex = constraint.RigidBodyIndex;
+            if (rigidBodyIndex < 0 || rigidBodyIndex >= world.NumDynamicBodies)
+            {
+                // Invalid and static bodies should be skipped
+                continue;
+            }
 
+            RigidBody body = world.Bodies[rigidBodyIndex];
+
+            float3 pointRelVel = world.GetLinearVelocity(rigidBodyIndex, constraint.HitPosition);
+            pointRelVel -= linearVelocity;
+
+            float projectedVelocity = math.dot(pointRelVel, constraint.Plane.Normal);
+
+            // Required velocity change
+            float deltaVelocity = - projectedVelocity * stepInput.Damping;
+
+            float distance = constraint.Plane.Distance;
+            if (distance < 0.0f)
+            {
+                deltaVelocity += (distance / stepInput.DeltaTime) * stepInput.Tau;
+            }
+
+            // Calculate impulse
+            MotionVelocity mv = world.MotionVelocities[rigidBodyIndex];
             float3 impulse = float3.zero;
-
-            if (rigidBodyIndex < 0)
+            if (deltaVelocity < 0.0f)
             {
-                continue;
+                // Impulse magnitude
+                float impulseMagnitude = 0.0f;
+                {
+                    float objectMassInv = GetInvMassAtPoint(constraint.HitPosition, constraint.Plane.Normal, body, mv);
+                    impulseMagnitude = deltaVelocity / objectMassInv;
+                }
+
+                impulse = impulseMagnitude * constraint.Plane.Normal;
             }
 
-            // Skip static bodies if needed to calculate impulse
-            if (affectBodies && (rigidBodyIndex < world.NumDynamicBodies))
+            // Add gravity
             {
-                RigidBody body = world.Bodies[rigidBodyIndex];
+                // Effect of gravity on character velocity in the normal direction
+                float3 charVelDown = stepInput.Gravity * stepInput.DeltaTime;
+                float relVelN = math.dot(charVelDown, constraint.Plane.Normal);
 
-                float3 pointRelVel = world.GetLinearVelocity(rigidBodyIndex, constraint.HitPosition);
-                pointRelVel -= linearVelocity;
-
-                float projectedVelocity = math.dot(pointRelVel, constraint.Plane.Normal);
-
-                // Required velocity change
-                float deltaVelocity = -projectedVelocity * stepInput.Damping;
-
-                float distance = constraint.Plane.Distance;
-                if (distance < 0.0f)
+                // Subtract separation velocity if separating contact
                 {
-                    deltaVelocity += (distance / stepInput.DeltaTime) * stepInput.Tau;
+                    bool isSeparatingContact = projectedVelocity < 0.0f;
+                    float newRelVelN = relVelN - projectedVelocity;
+                    relVelN = math.select(relVelN, newRelVelN, isSeparatingContact);
                 }
 
-                // Calculate impulse
-                MotionVelocity mv = world.MotionVelocities[rigidBodyIndex];
-                if (deltaVelocity < 0.0f)
+                // If resulting velocity is negative, an impulse is applied to stop the character
+                // from falling into the body
                 {
-                    // Impulse magnitude
-                    float impulseMagnitude = 0.0f;
-                    {
-                        float objectMassInv = GetInvMassAtPoint(constraint.HitPosition, constraint.Plane.Normal, body, mv);
-                        impulseMagnitude = deltaVelocity / objectMassInv;
-                    }
-
-                    impulse = impulseMagnitude * constraint.Plane.Normal;
+                    float3 newImpulse = impulse;
+                    newImpulse += relVelN * characterMass * constraint.Plane.Normal;
+                    impulse = math.select(impulse, newImpulse, relVelN < 0.0f);
                 }
-
-                // Add gravity
-                {
-                    // Effect of gravity on character velocity in the normal direction
-                    float3 charVelDown = stepInput.Gravity * stepInput.DeltaTime;
-                    float relVelN = math.dot(charVelDown, constraint.Plane.Normal);
-
-                    // Subtract separation velocity if separating contact
-                    {
-                        bool isSeparatingContact = projectedVelocity < 0.0f;
-                        float newRelVelN = relVelN - projectedVelocity;
-                        relVelN = math.select(relVelN, newRelVelN, isSeparatingContact);
-                    }
-
-                    // If resulting velocity is negative, an impulse is applied to stop the character
-                    // from falling into the body
-                    {
-                        float3 newImpulse = impulse;
-                        newImpulse += relVelN * characterMass * constraint.Plane.Normal;
-                        impulse = math.select(impulse, newImpulse, relVelN < 0.0f);
-                    }
-                }
-
-                // Store impulse
-                deferredImpulseWriter.Write(
-                    new DeferredCharacterControllerImpulse()
-                    {
-                        Entity = body.Entity,
-                        Impulse = impulse,
-                        Point = constraint.HitPosition
-                    });
             }
 
-            if (collisionEvents.IsCreated && constraint.Touched && !constraint.IsMaxSlope)
-            {
-                var collisionEvent = new StatefulCollisionEvent(world.Bodies[stepInput.RigidBodyIndex].Entity,
-                    world.Bodies[rigidBodyIndex].Entity, stepInput.RigidBodyIndex, rigidBodyIndex, ColliderKey.Empty,
-                    constraint.ColliderKey, constraint.Plane.Normal);
-                collisionEvent.CollisionDetails = new StatefulCollisionEvent.Details(
-                    1, math.dot(impulse, collisionEvent.Normal), constraint.HitPosition);
-
-                // check if collision event exists for the same bodyID and colliderKey
-                // although this is a nested for, number of solved constraints shouldn't be high
-                // if the same constraint (same entities, rigidbody indices and collider keys)
-                // is solved in multiple solver iterations, pick the one from latest iteration
-                bool newEvent = true;
-                for (int j = 0; j < collisionEvents.Length; j++)
+            // Store impulse
+            deferredImpulseWriter.Write(
+                new DeferredCharacterControllerImpulse()
                 {
-                    if (collisionEvents[j].CompareTo(collisionEvent) == 0)
-                    {
-                        collisionEvents[j] = collisionEvent;
-                        newEvent = false;
-                        break;
-                    }
-                }
-                if (newEvent)
-                {
-                    collisionEvents.Add(collisionEvent);
-                }
-            }
+                    Entity = body.Entity,
+                    Impulse = impulse,
+                    Point = constraint.HitPosition
+                });
         }
     }
 
-    private static void UpdateTriggersSeen<T> (CharacterControllerStepInput stepInput, NativeList<T> triggerHits,
-        NativeList<StatefulTriggerEvent> currentFrameTriggerEvents, float maxFraction) where T : struct, IQueryResult
-    {
-        var world = stepInput.World;
-        for (int i = 0; i < triggerHits.Length; i++)
-        {
-            var hit = triggerHits[i];
-
-            if (hit.Fraction > maxFraction)
-            {
-                continue;
-            }
-
-            var found = false;
-            for (int j = 0; j < currentFrameTriggerEvents.Length; j++)
-            {
-                var triggerEvent = currentFrameTriggerEvents[j];
-                if ((triggerEvent.EntityB == hit.Entity) &&
-                    (triggerEvent.ColliderKeyB.Value == hit.ColliderKey.Value))
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-            {
-                currentFrameTriggerEvents.Add(new StatefulTriggerEvent(world.Bodies[stepInput.RigidBodyIndex].Entity, hit.Entity,
-                    stepInput.RigidBodyIndex, hit.RigidBodyIndex, ColliderKey.Empty, hit.ColliderKey));
-            }
-        }
-    }
-
-    private static unsafe bool IsTrigger(NativeArray<RigidBody> bodies, int rigidBodyIndex, ColliderKey colliderKey)
+    private static unsafe bool IsTrigger(NativeSlice<RigidBody> bodies, int rigidBodyIndex, ColliderKey colliderKey)
     {
         RigidBody hitBody = bodies[rigidBodyIndex];
         hitBody.Collider.Value.GetLeaf(colliderKey, out ChildCollider leafCollider);
-        Unity.Physics.Material material = UnsafeUtility.AsRef<ConvexColliderHeader>(leafCollider.Collider).Material;
-        return material.CollisionResponse == CollisionResponsePolicy.RaiseTriggerEvents;
+        Material material = UnsafeUtilityEx.AsRef<ConvexColliderHeader>(leafCollider.Collider).Material;
+        return material.IsTrigger;
     }
 
     static float GetInvMassAtPoint(float3 point, float3 normal, RigidBody body, MotionVelocity mv)

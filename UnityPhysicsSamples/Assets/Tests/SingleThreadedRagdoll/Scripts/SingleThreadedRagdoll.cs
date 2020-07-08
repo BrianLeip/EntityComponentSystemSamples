@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -29,7 +29,6 @@ public class SingleThreadedRagdoll : MonoBehaviour
             World = PhysicsWorld,
             TimeStep = Time.fixedDeltaTime,
             NumSolverIterations = PhysicsStep.Default.SolverIterationCount,
-            SolverStabilizationHeuristicSettings = PhysicsStep.Default.SolverStabilizationHeuristicSettings,
             Gravity = PhysicsStep.Default.Gravity
         };
 
@@ -54,7 +53,7 @@ public class SingleThreadedRagdoll : MonoBehaviour
         else
 #endif
         {
-            SimulationContext.Reset(input);
+            SimulationContext.Reset(ref PhysicsWorld);
 
             new SingleThreadedPhysicsSimulationJob
             {
@@ -105,10 +104,10 @@ public class SingleThreadedRagdoll : MonoBehaviour
         internal static void CreateRigidBodiesAndMotions(SimulationStepInput input,
             NativeList<BodyInfo> bodies, NativeHashMap<int, int> indexMap)
         {
-            NativeArray<RigidBody> dynamicBodies = input.World.DynamicBodies;
-            NativeArray<RigidBody> staticBodies = input.World.StaticBodies;
-            NativeArray<MotionData> motionDatas = input.World.MotionDatas;
-            NativeArray<MotionVelocity> motionVelocities = input.World.MotionVelocities;
+            NativeSlice<RigidBody> dynamicBodies = input.World.DynamicBodies;
+            NativeSlice<RigidBody> staticBodies = input.World.StaticBodies;
+            NativeSlice<MotionData> motionDatas = input.World.MotionDatas;
+            NativeSlice<MotionVelocity> motionVelocities = input.World.MotionVelocities;
 
             int dynamicBodyIndex = 0;
             int staticBodyIndex = 0;
@@ -138,7 +137,8 @@ public class SingleThreadedRagdoll : MonoBehaviour
                             ),
                             BodyFromMotion = new RigidTransform(collider->MassProperties.MassDistribution.Transform.rot, collider->MassProperties.MassDistribution.Transform.pos),
                             LinearDamping = 0.0f,
-                            AngularDamping = 0.0f
+                            AngularDamping = 0.0f,
+                            GravityFactor = 1.0f
                         };
                         motionVelocities[dynamicBodyIndex] = new MotionVelocity
                         {
@@ -146,8 +146,7 @@ public class SingleThreadedRagdoll : MonoBehaviour
                             AngularVelocity = bodyInfo.AngularVelocity,
                             InverseInertia = math.rcp(collider->MassProperties.MassDistribution.InertiaTensor * bodyInfo.Mass),
                             InverseMass = math.rcp(bodyInfo.Mass),
-                            AngularExpansionFactor = collider->MassProperties.AngularExpansionFactor,
-                            GravityFactor = 1.0f
+                            AngularExpansionFactor = collider->MassProperties.AngularExpansionFactor
                         };
 
                         indexMap.Add(i, dynamicBodyIndex);
@@ -184,30 +183,29 @@ public class SingleThreadedRagdoll : MonoBehaviour
         internal static void CreateJoints(SimulationStepInput input,
             NativeList<JointInfo> jointInfos, NativeHashMap<int, int> indexMap)
         {
-            NativeArray<Unity.Physics.Joint> joints = input.World.Joints;
+            NativeSlice<Unity.Physics.Joint> joints = input.World.Joints;
 
             for (int i = 0; i < jointInfos.Length; i++)
             {
                 var jointInfo = jointInfos[i];
 
-                indexMap.TryGetValue(jointInfo.BodyIndexA, out int bodyIndexA);
-                indexMap.TryGetValue(jointInfo.BodyIndexB, out int bodyIndexB);
+                indexMap.TryGetValue(jointInfo.BodyAIndex, out int bodyAIndex);
+                indexMap.TryGetValue(jointInfo.BodyBIndex, out int bodyBIndex);
 
                 BodyIndexPair pair = new BodyIndexPair
                 {
-                    BodyIndexA = bodyIndexA,
-                    BodyIndexB = bodyIndexB
+                    BodyAIndex = bodyAIndex,
+                    BodyBIndex = bodyBIndex
                 };
+
+                int enabledCollisions = jointInfo.EnabledCollisions ? 1 : 0;
 
                 joints[i] = new Unity.Physics.Joint
                 {
+                    JointData = jointInfo.JointData,
                     BodyPair = pair,
                     Entity = Entity.Null,
-                    AFromJoint = new Math.MTransform(jointInfo.JointData.BodyAFromJoint.AsRigidTransform()),
-                    BFromJoint = new Math.MTransform(jointInfo.JointData.BodyBFromJoint.AsRigidTransform()),
-                    EnableCollision = (byte)(jointInfo.EnabledCollisions ? 1 : 0),
-                    Version = jointInfo.JointData.Version,
-                    Constraints = jointInfo.JointData.GetConstraints()
+                    EnableCollision = enabledCollisions
                 };
             }
         }
@@ -337,9 +335,9 @@ public class SingleThreadedRagdoll : MonoBehaviour
 
             bool enableCollisions = false;
 
-            PhysicsJoint hinge = default;
-            PhysicsJoint jointData0 = default;
-            PhysicsJoint jointData1 = default;
+            BlobAssetReference<JointData> hinge = default;
+            BlobAssetReference<JointData> jointData0 = default;
+            BlobAssetReference<JointData> jointData1 = default;
 
             switch (joint.Type)
             {
@@ -388,28 +386,28 @@ public class SingleThreadedRagdoll : MonoBehaviour
                     break;
             }
 
-            GetBodyIndices(bodyA, bodyB, out int bodyIndexA, out int bodyIndexB);
+            GetBodyIndices(bodyA, bodyB, out int bodyAIndex, out int bodyBIndex);
 
-            if (hinge.GetConstraints().Length > 0)
+            if (hinge != default)
             {
-                CreateJointInfo(hinge, bodyIndexA, bodyIndexB, enableCollisions);
+                CreateJointInfo(hinge, bodyAIndex, bodyBIndex, enableCollisions);
             }
 
-            if (jointData0.GetConstraints().Length > 0)
+            if (jointData0 != default)
             {
-                CreateJointInfo(jointData0, bodyIndexA, bodyIndexB, enableCollisions);
+                CreateJointInfo(jointData0, bodyAIndex, bodyBIndex, enableCollisions);
             }
 
-            if (jointData1.GetConstraints().Length > 0)
+            if (jointData1 != default)
             {
-                CreateJointInfo(jointData1, bodyIndexA, bodyIndexB, enableCollisions);
+                CreateJointInfo(jointData1, bodyAIndex, bodyBIndex, enableCollisions);
             }
         }
     }
 
-    private void GetBodyIndices(GameObject bodyA, GameObject bodyB, out int bodyIndexA, out int bodyIndexB)
+    private void GetBodyIndices(GameObject bodyA, GameObject bodyB, out int bodyAIndex, out int bodyBIndex)
     {
-        bodyIndexA = bodyIndexB = -1;
+        bodyAIndex = bodyBIndex = -1;
 
         for (int i = 0; i < m_Bodies.Length; i++)
         {
@@ -417,24 +415,24 @@ public class SingleThreadedRagdoll : MonoBehaviour
             {
                 if (go == bodyA)
                 {
-                    bodyIndexA = i;
+                    bodyAIndex = i;
                 }
 
                 if (go == bodyB)
                 {
-                    bodyIndexB = i;
+                    bodyBIndex = i;
                 }
             }
         }
     }
 
-    private void CreateJointInfo(PhysicsJoint jointData, int bodyIndexA, int bodyIndexB, bool enabledCollisions)
+    private void CreateJointInfo(BlobAssetReference<JointData> jointData, int bodyAIndex, int bodyBIndex, bool enabledCollisions)
     {
         m_Joints.Add(new JointInfo
         {
             JointData = jointData,
-            BodyIndexA = bodyIndexA,
-            BodyIndexB = bodyIndexB,
+            BodyAIndex = bodyAIndex,
+            BodyBIndex = bodyBIndex,
             EnabledCollisions = enabledCollisions
         });
         m_NumJoints++;

@@ -1,4 +1,4 @@
-using Unity.Burst;
+﻿using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -32,22 +32,10 @@ public class SingleThreadedPhysics : MonoBehaviour
         var system = BasePhysicsDemo.DefaultWorld.GetExistingSystem<SingleThreadedPhysicsSystem>();
         system.Initialize(ReferenceMaterial);
     }
-
-    private void OnEnable()
-    {
-        var system = BasePhysicsDemo.DefaultWorld.GetExistingSystem<SingleThreadedPhysicsSystem>();
-        system.Enabled = true;
-    }
-
-    private void OnDestroy()
-    {
-        var system = BasePhysicsDemo.DefaultWorld.GetExistingSystem<SingleThreadedPhysicsSystem>();
-        system.Enabled = false;
-    }
 }
 
 [UpdateAfter(typeof(StepPhysicsWorld))]
-public class SingleThreadedPhysicsSystem : SystemBase
+public class SingleThreadedPhysicsSystem : JobComponentSystem
 {
     public PhysicsWorld PhysicsWorld = new PhysicsWorld(0, 0, 0);
 
@@ -68,8 +56,8 @@ public class SingleThreadedPhysicsSystem : SystemBase
     // Static and dynamic rigid bodies
     public unsafe void CreateRigidBodies()
     {
-        NativeArray<RigidBody> dynamicBodies = PhysicsWorld.DynamicBodies;
-        NativeArray<RigidBody> staticBodies = PhysicsWorld.StaticBodies;
+        NativeSlice<RigidBody> dynamicBodies = PhysicsWorld.DynamicBodies;
+        NativeSlice<RigidBody> staticBodies = PhysicsWorld.StaticBodies;
 
         // Creating dynamic bodies
         {
@@ -139,8 +127,7 @@ public class SingleThreadedPhysicsSystem : SystemBase
     {
         NativeArray<CustomVelocity> customVelocities = CustomDynamicEntityGroup.ToComponentDataArray<CustomVelocity>(Allocator.TempJob);
         NativeArray<PhysicsMass> masses = CustomDynamicEntityGroup.ToComponentDataArray<PhysicsMass>(Allocator.TempJob);
-        NativeArray<PhysicsGravityFactor> gravityFactors = CustomDynamicEntityGroup.ToComponentDataArray<PhysicsGravityFactor>(Allocator.TempJob);
-        NativeArray<MotionVelocity> motionVelocities = PhysicsWorld.MotionVelocities;
+        NativeSlice<MotionVelocity> motionVelocities = PhysicsWorld.MotionVelocities;
 
         for (int i = 0; i < customVelocities.Length; i++)
         {
@@ -150,14 +137,12 @@ public class SingleThreadedPhysicsSystem : SystemBase
                 AngularVelocity = customVelocities[i].Angular,
                 InverseInertia = masses[i].InverseInertia,
                 InverseMass = masses[i].InverseMass,
-                AngularExpansionFactor = masses[i].AngularExpansionFactor,
-                GravityFactor = gravityFactors[i].Value
+                AngularExpansionFactor = masses[i].AngularExpansionFactor
             };
         }
 
         customVelocities.Dispose();
         masses.Dispose();
-        gravityFactors.Dispose();
     }
 
     public void CreateMotionDatas()
@@ -166,8 +151,9 @@ public class SingleThreadedPhysicsSystem : SystemBase
         NativeArray<Rotation> rotations = CustomDynamicEntityGroup.ToComponentDataArray<Rotation>(Allocator.TempJob);
         NativeArray<PhysicsMass> masses = CustomDynamicEntityGroup.ToComponentDataArray<PhysicsMass>(Allocator.TempJob);
         NativeArray<PhysicsDamping> dampings = CustomDynamicEntityGroup.ToComponentDataArray<PhysicsDamping>(Allocator.TempJob);
+        NativeArray<PhysicsGravityFactor> gravityFactors = CustomDynamicEntityGroup.ToComponentDataArray<PhysicsGravityFactor>(Allocator.TempJob);
 
-        NativeArray<MotionData> motionDatas = PhysicsWorld.MotionDatas;
+        NativeSlice<MotionData> motionDatas = PhysicsWorld.MotionDatas;
         for (int i = 0; i < positions.Length; i++)
         {
             motionDatas[i] = new MotionData
@@ -178,7 +164,8 @@ public class SingleThreadedPhysicsSystem : SystemBase
                 ),
                 BodyFromMotion = new RigidTransform(masses[i].InertiaOrientation, masses[i].CenterOfMass),
                 LinearDamping = dampings[i].Linear,
-                AngularDamping = dampings[i].Angular
+                AngularDamping = dampings[i].Angular,
+                GravityFactor = gravityFactors[i].Value
             };
         }
 
@@ -186,60 +173,55 @@ public class SingleThreadedPhysicsSystem : SystemBase
         rotations.Dispose();
         masses.Dispose();
         dampings.Dispose();
+        gravityFactors.Dispose();
     }
 
     public void CreateJoints()
     {
-        NativeArray<PhysicsConstrainedBodyPair> constrainedBodyPairs = JointEntityGroup.ToComponentDataArray<PhysicsConstrainedBodyPair>(Allocator.TempJob);
         NativeArray<PhysicsJoint> physicsJoints = JointEntityGroup.ToComponentDataArray<PhysicsJoint>(Allocator.TempJob);
-        NativeArray<Joint> joints = PhysicsWorld.Joints;
+        NativeSlice<Joint> joints = PhysicsWorld.Joints;
 
         for (int i = 0; i < physicsJoints.Length; i++)
         {
-            EntityMap.TryGetValue(constrainedBodyPairs[i].EntityA, out Entity entityA);
-            EntityMap.TryGetValue(constrainedBodyPairs[i].EntityB, out Entity entityB);
-            int bodyIndexA = -1;
+            EntityMap.TryGetValue(physicsJoints[i].EntityA, out Entity entityA);
+            EntityMap.TryGetValue(physicsJoints[i].EntityB, out Entity entityB);
+            int bodyAIndex = -1;
             if (entityA != Entity.Null)
             {
-                EntityToBodyIndexMap.TryGetValue(entityA, out bodyIndexA);
+                EntityToBodyIndexMap.TryGetValue(entityA, out bodyAIndex);
             }
             else
             {
-                bodyIndexA = PhysicsWorld.NumBodies - 1;
+                bodyAIndex = PhysicsWorld.NumBodies - 1;
             }
-            int bodyIndexB = -1;
+            int bodyBIndex = -1;
             if (entityB != Entity.Null)
             {
-                EntityToBodyIndexMap.TryGetValue(entityB, out bodyIndexB);
+                EntityToBodyIndexMap.TryGetValue(entityB, out bodyBIndex);
             }
             else
             {
-                bodyIndexB = PhysicsWorld.NumBodies - 1;
+                bodyBIndex = PhysicsWorld.NumBodies - 1;
             }
 
             var pair = new BodyIndexPair
             {
-                BodyIndexA = bodyIndexA,
-                BodyIndexB = bodyIndexB
+                BodyAIndex = bodyAIndex,
+                BodyBIndex = bodyBIndex
             };
-            var jointData = physicsJoints[i];
             joints[i] = new Joint
             {
+                JointData = physicsJoints[i].JointData,
                 BodyPair = pair,
                 Entity = Entity.Null,
-                AFromJoint = new Math.MTransform(jointData.BodyAFromJoint.AsRigidTransform()),
-                BFromJoint = new Math.MTransform(jointData.BodyBFromJoint.AsRigidTransform()),
-                EnableCollision = (byte)constrainedBodyPairs[i].EnableCollision,
-                Version = jointData.Version,
-                Constraints = jointData.GetConstraints()
+                EnableCollision = physicsJoints[i].EnableCollision
             };
         }
 
         physicsJoints.Dispose();
-        constrainedBodyPairs.Dispose();
     }
 
-    public void ExportMotions(NativeArray<RigidBody> dynamicBodies, NativeArray<MotionData> motionDatas, NativeArray<MotionVelocity> motionVelocities)
+    public void ExportMotions(NativeSlice<RigidBody> dynamicBodies, NativeSlice<MotionData> motionDatas, NativeSlice<MotionVelocity> motionVelocities)
     {
         for (int i = 0; i < dynamicBodies.Length; i++)
         {
@@ -374,67 +356,56 @@ public class SingleThreadedPhysicsSystem : SystemBase
 #if HAVOK_PHYSICS_EXISTS
         HavokSimulationContext = new Havok.Physics.SimulationContext(Havok.Physics.HavokConfiguration.Default);
 #endif
-    }
+}
 
-    protected override void OnCreate()
+protected override void OnCreate()
     {
-        Enabled = false;
         CustomDynamicEntityGroup = GetEntityQuery(new EntityQueryDesc
         {
             All = new ComponentType[]
-            {
-                typeof(CustomVelocity),
-                typeof(Translation),
-                typeof(Rotation),
-                typeof(CustomCollider),
-                typeof(PhysicsCustomTags),
-                typeof(PhysicsMass),
-                typeof(PhysicsDamping),
-                typeof(PhysicsGravityFactor)
-            },
-            None = new ComponentType[]
-            {
-                typeof(PhysicsExclude)
-            }
+                {
+                    typeof(CustomVelocity),
+                    typeof(Translation),
+                    typeof(Rotation),
+                    typeof(CustomCollider),
+                    typeof(PhysicsCustomTags),
+                    typeof(PhysicsMass),
+                    typeof(PhysicsDamping),
+                    typeof(PhysicsGravityFactor)
+                }
         });
 
         CustomStaticEntityGroup = GetEntityQuery(new EntityQueryDesc
         {
             All = new ComponentType[]
-            {
-                typeof(CustomCollider),
-                typeof(Translation),
-                typeof(Rotation),
-                typeof(PhysicsCustomTags)
-            },
+                {
+                    typeof(CustomCollider),
+                    typeof(Translation),
+                    typeof(Rotation),
+                    typeof(PhysicsCustomTags)
+                },
             None = new ComponentType[]
-            {
-                typeof(CustomVelocity),
-                typeof(PhysicsExclude)
-            }
+                {
+                    typeof(CustomVelocity)
+                },
         });
 
         JointEntityGroup = GetEntityQuery(new EntityQueryDesc
         {
             All = new ComponentType[]
-            {
-                typeof(PhysicsConstrainedBodyPair),
-                typeof(PhysicsJoint)
-            },
-            None = new ComponentType[]
-            {
-                typeof(PhysicsExclude)
-            }
+                {
+                    typeof(PhysicsJoint)
+                }
         });
 
         m_StepPhysicsWorld = World.GetOrCreateSystem<StepPhysicsWorld>();
         EntityMap = new NativeHashMap<Entity, Entity>(0, Allocator.Persistent);
     }
 
-    protected override void OnUpdate()
+    protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
         // Make sure regular physics world is stepped
-        m_StepPhysicsWorld.GetOutputDependency().Complete();
+        m_StepPhysicsWorld.FinalJobHandle.Complete();
 
         int numDynamicBodies = CustomDynamicEntityGroup.CalculateEntityCount();
         int numStaticBodies = CustomStaticEntityGroup.CalculateEntityCount();
@@ -466,14 +437,13 @@ public class SingleThreadedPhysicsSystem : SystemBase
             {
                 World = PhysicsWorld,
                 TimeStep = UnityEngine.Time.fixedDeltaTime,
-                SolverStabilizationHeuristicSettings = stepComponent.SolverStabilizationHeuristicSettings,
                 NumSolverIterations = stepComponent.SolverIterationCount,
                 Gravity = stepComponent.Gravity
             };
 
             if (stepComponent.SimulationType == SimulationType.UnityPhysics)
             {
-                SimulationContext.Reset(input);
+                SimulationContext.Reset(ref PhysicsWorld);
 
                 new SimulateSingleThreadedJob
                 {
@@ -497,6 +467,8 @@ public class SingleThreadedPhysicsSystem : SystemBase
 
         // Export the data
         ExportMotions(PhysicsWorld.DynamicBodies, PhysicsWorld.MotionDatas, PhysicsWorld.MotionVelocities);
+
+        return default;
     }
 
     [BurstCompile]

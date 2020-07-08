@@ -82,7 +82,7 @@ public class LinearDashpotSystem : ComponentSystem
     protected override void OnUpdate()
     {
         // Make sure the world has finished building before querying it
-        m_BuildPhysicsWorldSystem.GetOutputDependency().Complete();
+        m_BuildPhysicsWorldSystem.FinalJobHandle.Complete();
 
         Entities.ForEach( (ref LinearDashpot dashpot) =>
         {

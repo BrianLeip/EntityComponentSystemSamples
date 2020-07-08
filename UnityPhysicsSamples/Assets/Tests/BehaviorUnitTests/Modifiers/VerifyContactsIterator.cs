@@ -29,7 +29,7 @@ namespace Unity.Physics.Tests
     }
 
     [UpdateBefore(typeof(StepPhysicsWorld))]
-    public class VerifyContactsIteratorSystem : SystemBase
+    public class VerifyContactsIteratorSystem : JobComponentSystem
     {
         EntityQuery m_VerificationGroup;
         StepPhysicsWorld m_StepPhysicsWorld;
@@ -61,7 +61,7 @@ namespace Unity.Physics.Tests
             public NativeArray<int> CurrentManifoldNumContacts;
 
             [ReadOnly]
-            public NativeArray<RigidBody> Bodies;
+            public NativeSlice<RigidBody> Bodies;
 
             [ReadOnly]
             public ComponentDataFromEntity<VerifyContactsIteratorData> VerificationData;
@@ -76,15 +76,15 @@ namespace Unity.Physics.Tests
                 }
 
                 // Header verification
-                Assert.AreEqual(manifold.CustomTagsA, (byte)0);
-                Assert.AreEqual(manifold.CustomTagsB, (byte)0);
-                Assert.AreNotEqual(manifold.BodyIndexA, manifold.BodyIndexB);
+                Assert.AreEqual(manifold.BodyCustomTags.CustomTagsA, (byte)0);
+                Assert.AreEqual(manifold.BodyCustomTags.CustomTagsB, (byte)0);
+                Assert.AreNotEqual(manifold.BodyIndexPair.BodyAIndex, manifold.BodyIndexPair.BodyBIndex);
                 Assert.AreApproximatelyEqual(manifold.CoefficientOfFriction, 0.5f, 0.01f);
                 Assert.AreApproximatelyEqual(manifold.CoefficientOfRestitution, 0.0f, 0.01f);
-                Assert.AreEqual(manifold.ColliderKeyA.Value, ColliderKey.Empty.Value);
-                Assert.AreEqual(manifold.ColliderKeyB.Value, ColliderKey.Empty.Value);
-                Assert.AreEqual(manifold.EntityA, Bodies[manifold.BodyIndexA].Entity);
-                Assert.AreEqual(manifold.EntityB, Bodies[manifold.BodyIndexB].Entity);
+                Assert.AreEqual(manifold.ColliderKeys.ColliderKeyA.Value, ColliderKey.Empty.Value);
+                Assert.AreEqual(manifold.ColliderKeys.ColliderKeyB.Value, ColliderKey.Empty.Value);
+                Assert.AreEqual(manifold.Entities.EntityA, Bodies[manifold.BodyIndexPair.BodyAIndex].Entity);
+                Assert.AreEqual(manifold.Entities.EntityB, Bodies[manifold.BodyIndexPair.BodyBIndex].Entity);
                 Assert.AreEqual(manifold.JacobianFlags, (JacobianFlags)0);
                 Assert.IsFalse(manifold.Modified);
                 Assert.AreEqual(manifold.NumContacts, 4);
@@ -115,7 +115,7 @@ namespace Unity.Physics.Tests
             }
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             SimulationCallbacks.Callback verifyContactsIteratorJobCallback = (ref ISimulation simulation, ref PhysicsWorld world, JobHandle inDeps) =>
             {
@@ -136,8 +136,10 @@ namespace Unity.Physics.Tests
                 }.Schedule(inDeps);
             };
 
-            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateContacts, verifyContactsIteratorJobCallback, Dependency);
-            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateContactJacobians, verifyNumContactsJobCallback, Dependency);
+            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateContacts, verifyContactsIteratorJobCallback, inputDeps);
+            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateContactJacobians, verifyNumContactsJobCallback, inputDeps);
+
+            return inputDeps;
         }
     }
 }

@@ -61,7 +61,7 @@ namespace Unity.Physics.Samples.Test
         }
 #if !UNITY_EDITOR
         [UnityTest]
-        [Timeout(240000)]
+        [Timeout(60000)]
 #endif
         public virtual IEnumerator LoadScenes([ValueSource(nameof(GetScenes))] string scenePath)
         {
@@ -122,7 +122,6 @@ namespace Unity.Physics.Samples.Test
             {
                 Gravity = stepComponent.Gravity,
                 NumSolverIterations = stepComponent.SolverIterationCount,
-                SolverStabilizationHeuristicSettings = stepComponent.SolverStabilizationHeuristicSettings,
                 SynchronizeCollisionWorld = true,
                 TimeStep = Time.fixedDeltaTime
             };
@@ -159,7 +158,7 @@ namespace Unity.Physics.Samples.Test
                         var simulationContext = new SimulationContext();
                         for (int step = 0; step < k_StopAfterStep; step++)
                         {
-                            simulationContext.Reset(stepInput);
+                            simulationContext.Reset(ref stepInput.World);
                             new StepJob
                             {
                                 Input = stepInput,
@@ -298,7 +297,7 @@ namespace Unity.Physics.Samples.Test
 
             protected override void OnUpdate()
             {
-                BuildPhysicWorldSystem.GetOutputDependency().Complete();
+                BuildPhysicWorldSystem.FinalJobHandle.Complete();
                 if (BuildPhysicWorldSystem.PhysicsWorld.NumBodies != 0)
                 {
                     EntityManager.CompleteAllJobs();

@@ -22,7 +22,7 @@ namespace Unity.Physics.Tests
     }
 
     [UpdateBefore(typeof(StepPhysicsWorld))]
-    public class VerifyGravityFactorSystem : SystemBase
+    public class VerifyGravityFactorSystem : JobComponentSystem
     {
         EntityQuery m_VerificationGroup;
 
@@ -34,7 +34,7 @@ namespace Unity.Physics.Tests
             });
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             var entities = m_VerificationGroup.ToEntityArray(Allocator.TempJob);
             foreach (var entity in entities)
@@ -47,6 +47,8 @@ namespace Unity.Physics.Tests
                 Assert.AreEqual(translation.Value.z, 0.0f);
             }
             entities.Dispose();
+
+            return inputDeps;
         }
     }
 }

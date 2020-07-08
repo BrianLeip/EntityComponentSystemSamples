@@ -36,7 +36,7 @@ public class ModifyNarrowphaseContactsBehaviour : MonoBehaviour, IConvertGameObj
 
 // A system which configures the simulation step to rotate certain contact normals
 [UpdateBefore(typeof(StepPhysicsWorld))]
-public class ModifyNarrowphaseContactsSystem : SystemBase
+public class ModifyNarrowphaseContactsSystem : JobComponentSystem
 {
     EntityQuery m_ContactModifierGroup;
     StepPhysicsWorld m_StepPhysicsWorld;
@@ -53,16 +53,16 @@ public class ModifyNarrowphaseContactsSystem : SystemBase
         });
     }
 
-    protected override void OnUpdate()
+    protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
         if (m_ContactModifierGroup.CalculateEntityCount() == 0)
         {
-            return;
+            return inputDeps;
         }
 
         if (m_StepPhysicsWorld.Simulation.Type == SimulationType.NoPhysics)
         {
-            return;
+            return inputDeps;
         }
 
         var modifiers = m_ContactModifierGroup.ToComponentDataArray<ModifyNarrowphaseContacts>(Allocator.TempJob);
@@ -81,6 +81,8 @@ public class ModifyNarrowphaseContactsSystem : SystemBase
         modifiers.Dispose();
 
         m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateContacts, callback);
+
+        return inputDeps;
     }
 
     [BurstCompile]
@@ -92,7 +94,7 @@ public class ModifyNarrowphaseContactsSystem : SystemBase
 
         public void Execute(ref ModifiableContactHeader contactHeader, ref ModifiableContactPoint contactPoint)
         {
-            bool bUpdateNormal = (contactHeader.BodyIndexA == m_SurfaceRBIdx) || (contactHeader.BodyIndexB == m_SurfaceRBIdx);
+            bool bUpdateNormal = (contactHeader.BodyIndexPair.BodyAIndex == m_SurfaceRBIdx) || (contactHeader.BodyIndexPair.BodyBIndex == m_SurfaceRBIdx);
 
             if (bUpdateNormal && contactPoint.Index == 0)
             {

@@ -22,7 +22,7 @@ namespace Unity.Physics.Tests
     }
 
     [UpdateBefore(typeof(StepPhysicsWorld))]
-    public class VerifyCollisionSystem : SystemBase
+    public class VerifyCollisionSystem : JobComponentSystem
     {
         EntityQuery m_VerificationGroup;
 
@@ -34,7 +34,7 @@ namespace Unity.Physics.Tests
             });
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             var entities = m_VerificationGroup.ToEntityArray(Allocator.TempJob);
             foreach (var entity in entities)
@@ -44,6 +44,8 @@ namespace Unity.Physics.Tests
                 Assert.IsTrue(translation.Value.y > -0.001f);
             }
             entities.Dispose();
+
+            return inputDeps;
         }
     }
 }

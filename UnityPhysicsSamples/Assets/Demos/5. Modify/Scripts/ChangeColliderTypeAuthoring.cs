@@ -59,17 +59,8 @@ public class ChangeColliderTypeSystem : SystemBase
 {
     EntityCommandBufferSystem m_EntityCommandBufferSystem;
 
-    protected override void OnCreate()
-    {
+    protected override void OnCreate() =>
         m_EntityCommandBufferSystem = World.GetOrCreateSystem<EndSimulationEntityCommandBufferSystem>();
-        RequireForUpdate(GetEntityQuery(new EntityQueryDesc
-        {
-            All = new ComponentType[]
-            {
-                typeof(ChangeColliderType)
-            }
-        }));
-    }
 
     protected override unsafe void OnUpdate()
     {

@@ -18,14 +18,14 @@ class RotateAuthoring : MonoBehaviour, IConvertGameObjectToEntity
         dstManager.AddComponentData(entity, new Rotate { AngularVelocity = math.radians(m_AngularVelocity) });
 }
 
-class RotateSystem : SystemBase
+class RotateSystem : JobComponentSystem
 {
-    protected override void OnUpdate()
+    protected override JobHandle OnUpdate(JobHandle inputDeps)
     {
         var deltaTime = Time.DeltaTime;
-        Entities.ForEach((ref Rotation rotation, in Rotate rotate) =>
+        return Entities.ForEach((ref Rotate rotate, ref Rotation rotation) =>
         {
             rotation.Value = math.mul(rotation.Value, quaternion.EulerZXY(rotate.AngularVelocity * deltaTime));
-        }).Schedule();
+        }).Schedule(inputDeps);
     }
 }

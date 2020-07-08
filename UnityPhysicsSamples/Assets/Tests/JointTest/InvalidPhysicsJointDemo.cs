@@ -1,6 +1,7 @@
 ﻿using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Physics;
+using UnityEngine;
 
 public class InvalidPhysicsJointDemo : BasePhysicsDemo
 {
@@ -36,8 +37,8 @@ public class InvalidPhysicsJointDemo : BasePhysicsDemo
 
             // Create the joint
             float3 pivotLocal = float3.zero;
-            var joint = PhysicsJoint.CreateBallAndSocket(pivotLocal, pivotWorld);
-            var jointEntity = CreateJoint(joint, body, Entity.Null);
+            BlobAssetReference<JointData> jointData = JointData.CreateBallAndSocket(pivotLocal, pivotWorld);
+            var jointEntity = CreateJoint(jointData, body, Entity.Null);
 
             // add timeout on joint entity after 30 frames.
             manager.AddComponentData(jointEntity, new LifeTime { Value = 30 });
@@ -52,8 +53,8 @@ public class InvalidPhysicsJointDemo : BasePhysicsDemo
 
             // Create the joint
             float3 pivotLocal = float3.zero;
-            var joint = PhysicsJoint.CreateBallAndSocket(pivotLocal, pivotLocal);
-            var jointEntity = CreateJoint(joint, bodyA, bodyB);
+            BlobAssetReference<JointData> jointData = JointData.CreateBallAndSocket(pivotLocal, pivotLocal);
+            var jointEntity = CreateJoint(jointData, bodyA, bodyB);
 
             // add timeout on joint entity after 15 frames.
             manager.AddComponentData(jointEntity, new LifeTime { Value = 15 });

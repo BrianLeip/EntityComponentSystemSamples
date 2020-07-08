@@ -3,8 +3,10 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 [AlwaysUpdateSystem]
-[UpdateInGroup(typeof(InitializationSystemGroup))]
-class DemoInputGatheringSystem : SystemBase,
+[UpdateBefore(typeof(CharacterControllerOneToManyInputSystem))]
+[UpdateBefore(typeof(CharacterGunOneToManyInputSystem))]
+[UpdateBefore(typeof(VehicleSteeringSystem))]
+class DemoInputGatheringSystem : ComponentSystem,
     InputActions.ICharacterControllerActions,
     InputActions.IVehicleActions
 {

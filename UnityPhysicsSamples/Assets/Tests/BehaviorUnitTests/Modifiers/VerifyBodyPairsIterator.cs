@@ -23,7 +23,7 @@ namespace Unity.Physics.Tests
     }
 
     [UpdateBefore(typeof(StepPhysicsWorld))]
-    public class VerifyBodyPairsIteratorSystem : SystemBase
+    public class VerifyBodyPairsIteratorSystem : JobComponentSystem
     {
         EntityQuery m_VerificationGroup;
         StepPhysicsWorld m_StepPhysicsWorld;
@@ -40,20 +40,20 @@ namespace Unity.Physics.Tests
         struct VerifyBodyPairsIteratorJob : IBodyPairsJob
         {
             [ReadOnly]
-            public NativeArray<RigidBody> Bodies;
+            public NativeSlice<RigidBody> Bodies;
 
             [ReadOnly]
             public ComponentDataFromEntity<VerifyBodyPairsIteratorData> VerificationData;
 
             public void Execute(ref ModifiableBodyPair pair)
             {
-                Assert.AreNotEqual(pair.BodyIndexA, pair.BodyIndexB);
-                Assert.AreEqual(pair.EntityA, Bodies[pair.BodyIndexA].Entity);
-                Assert.AreEqual(pair.EntityB, Bodies[pair.BodyIndexB].Entity);
+                Assert.AreNotEqual(pair.BodyIndices.BodyAIndex, pair.BodyIndices.BodyBIndex);
+                Assert.AreEqual(pair.Entities.EntityA, Bodies[pair.BodyIndices.BodyAIndex].Entity);
+                Assert.AreEqual(pair.Entities.EntityB, Bodies[pair.BodyIndices.BodyBIndex].Entity);
             }
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             SimulationCallbacks.Callback verifyBodyPairsIteratorJobCallback = (ref ISimulation simulation, ref PhysicsWorld world, JobHandle inDeps) =>
             {
@@ -64,7 +64,9 @@ namespace Unity.Physics.Tests
                 }.Schedule(simulation, ref world, inDeps);
             };
 
-            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateDispatchPairs, verifyBodyPairsIteratorJobCallback, Dependency);
+            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostCreateDispatchPairs, verifyBodyPairsIteratorJobCallback, inputDeps);
+
+            return inputDeps;
         }
     }
 }

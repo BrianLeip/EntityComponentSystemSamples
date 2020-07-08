@@ -1,4 +1,5 @@
 ﻿using Unity.Entities;
+using UnityEngine;
 
 namespace Unity.Physics.Authoring
 {
@@ -9,7 +10,7 @@ namespace Unity.Physics.Authoring
 
     [UpdateAfter(typeof(PhysicsBodyConversionSystem))]
     [UpdateAfter(typeof(LegacyRigidbodyConversionSystem))]
-    [UpdateAfter(typeof(EndJointConversionSystem))]
+    [UpdateAfter(typeof(LegacyJointConversionSystem))]
     public class PhysicsSamplesConversionSystem : GameObjectConversionSystem
     {
         // Update is called once per frame
@@ -18,7 +19,7 @@ namespace Unity.Physics.Authoring
             Entities.ForEach((SetInertiaInverseBehaviour behaviour) => { behaviour.Convert(GetPrimaryEntity(behaviour), DstEntityManager, this); });
             Entities.ForEach((ChangeSphereColliderRadiusAuthoring behaviour) => { behaviour.Convert(GetPrimaryEntity(behaviour), DstEntityManager, this); });
             Entities.ForEach((ChangeColliderTypeAuthoring behaviour) => { behaviour.Convert(GetPrimaryEntity(behaviour), DstEntityManager, this); });
-            Entities.ForEach((ChangeMotionTypeAuthoring behaviour) => { behaviour.Convert(GetPrimaryEntity(behaviour), DstEntityManager, this); });
+            Entities.ForEach((ChangeMotionTypeBehaviour behaviour) => { behaviour.Convert(GetPrimaryEntity(behaviour), DstEntityManager, this); });
         }
     }
 }

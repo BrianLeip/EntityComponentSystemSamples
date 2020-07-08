@@ -29,7 +29,7 @@ namespace Unity.Physics.Tests
     }
 
     [UpdateBefore(typeof(StepPhysicsWorld))]
-    public class VerifyCollisionEventsSystem : SystemBase
+    public class VerifyCollisionEventsSystem : JobComponentSystem
     {
         EntityQuery m_VerificationGroup;
         StepPhysicsWorld m_StepPhysicsWorld;
@@ -87,7 +87,7 @@ namespace Unity.Physics.Tests
             }
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             SimulationCallbacks.Callback testCollisionEventsCallback = (ref ISimulation simulation, ref PhysicsWorld world, JobHandle inDeps) =>
             {
@@ -108,8 +108,10 @@ namespace Unity.Physics.Tests
                 }.Schedule(inDeps);
             };
 
-            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostSolveJacobians, testCollisionEventsCallback, Dependency);
-            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostSolveJacobians, testCollisionEventsPostCallback, Dependency);
+            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostSolveJacobians, testCollisionEventsCallback, inputDeps);
+            m_StepPhysicsWorld.EnqueueCallback(SimulationCallbacks.Phase.PostSolveJacobians, testCollisionEventsPostCallback, inputDeps);
+
+            return inputDeps;
         }
     }
 }

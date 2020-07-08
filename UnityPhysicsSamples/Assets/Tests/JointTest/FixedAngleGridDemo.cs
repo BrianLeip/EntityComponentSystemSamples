@@ -2,6 +2,9 @@
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Physics;
+using UnityEngine;
+using static Unity.Physics.Math;
+
 
 public class FixedAngleGridDemo : BasePhysicsDemo
 {
@@ -48,25 +51,23 @@ public class FixedAngleGridDemo : BasePhysicsDemo
             float3 pivotLocal = float3.zero;
             float3 pivotInWorld = math.transform(GetBodyTransform(body), pivotLocal);
 
-            var jointData = new PhysicsJoint
-            {
-                BodyAFromJoint = new RigidTransform(orientationA, pivotLocal),
-                BodyBFromJoint = new RigidTransform(orientationB, pivotInWorld)
-            };
-            jointData.SetConstraints(new FixedList128<Constraint>
-            {
-                Length = 2,
-                [0] = Constraint.BallAndSocket(),
-                [1] = new Constraint
+            BlobAssetReference<JointData> jointData = JointData.Create(
+                new RigidTransform(orientationA, pivotLocal),
+                new RigidTransform(orientationB, pivotInWorld),
+                new NativeArray<Constraint>(2, Allocator.Temp)
                 {
-                    ConstrainedAxes = new bool3(true, true, true),
-                    Type = ConstraintType.Angular,
-                    Min = math.max(i - 5, 0) * 0.1f,
-                    Max = i * 0.1f,
-                    SpringDamping = Constraint.DefaultSpringDamping,
-                    SpringFrequency = Constraint.DefaultSpringFrequency
+                    [0]  = Constraint.BallAndSocket(),
+                    [1] = new Constraint {
+                        ConstrainedAxes = new bool3(true, true, true),
+                        Type = ConstraintType.Angular,
+                        Min = math.max(i - 5, 0) * 0.1f,
+                        Max = i * 0.1f,
+                        SpringDamping = Constraint.DefaultSpringDamping,
+                        SpringFrequency = Constraint.DefaultSpringFrequency
+                    }
                 }
-            });
+
+            );
             CreateJoint(jointData, body, Entity.Null);
         }
     }

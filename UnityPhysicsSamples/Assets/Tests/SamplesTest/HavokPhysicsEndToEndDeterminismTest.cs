@@ -2,11 +2,12 @@
 using Unity.Entities;
 using Unity.Physics.Systems;
 using Unity.Jobs;
+using NUnit.Framework;
 
 namespace Unity.Physics.Samples.Test
 {
     [UpdateAfter(typeof(ExportPhysicsWorld)), UpdateBefore(typeof(EndFramePhysicsSystem))]
-    class HavokPhysicsDeterminismTestSystem : SystemBase, IDeterminismTestSystem
+    public class HavokPhysicsDeterminismTestSystem : JobComponentSystem, IDeterminismTestSystem
     {
         private BuildPhysicsWorld m_BuildPhysicsWorld;
         private StepPhysicsWorld m_StepPhysicsWorld;
@@ -52,51 +53,46 @@ namespace Unity.Physics.Samples.Test
             m_TestingFinished = true;
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             SimulatedFramesInCurrentTest++;
-            var handle = JobHandle.CombineDependencies(Dependency, m_ExportPhysicsWorld.GetOutputDependency());
+            inputDeps = JobHandle.CombineDependencies(inputDeps, m_ExportPhysicsWorld.FinalJobHandle);
 
             if (SimulatedFramesInCurrentTest == k_TestDurationInFrames)
             {
-                handle.Complete();
+                inputDeps.Complete();
                 FinishTesting();
             }
 
-            Dependency = handle;
+            return inputDeps;
         }
     }
 
     [UpdateBefore(typeof(BuildPhysicsWorld))]
-    class EnsureHavokSystem : ComponentSystem
+    public class EnsureHavokSystem : ComponentSystem
     {
         protected override void OnCreate()
         {
             Enabled = false;
         }
 
-        public static void EnsureHavok(ComponentSystem system)
+        protected override void OnUpdate()
         {
-            if (system.HasSingleton<PhysicsStep>())
+            if (HasSingleton<PhysicsStep>())
             {
-                var component = system.GetSingleton<PhysicsStep>();
+                var component = GetSingleton<PhysicsStep>();
                 if (component.SimulationType != SimulationType.HavokPhysics)
                 {
                     component.SimulationType = SimulationType.HavokPhysics;
-                    system.SetSingleton(component);
+                    SetSingleton(component);
                 }
-                system.Enabled = false;
+                Enabled = false;
             }
-        }
-
-        protected override void OnUpdate()
-        {
-            EnsureHavok(this);
         }
     }
 
     // Only works in standalone build, since it needs synchronous Burst compilation.
-#if !UNITY_EDITOR && UNITY_PHYSICS_INCLUDE_SLOW_TESTS
+#if !UNITY_EDITOR
     [TestFixture]
 #endif
     class HavokPhysicsEndToEndDeterminismTest : UnityPhysicsEndToEndDeterminismTest
